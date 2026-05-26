@@ -13,9 +13,21 @@ from qfluentwidgets import (FluentWindow, FluentIcon, NavigationItemPosition,
                             BodyLabel, isDarkTheme, IconWidget)
 
 from src.core.bot_thread import PosterThread, LoginThread, LogoutThread, FetchDataThread
+
 # ==========================================
-# BỘ HÀM XỬ LÝ LƯU CONFIG
+# CẤU HÌNH PROMPT MẶC ĐỊNH & LƯU CONFIG
 # ==========================================
+DEFAULT_AI_PROMPT = """Bạn là một chuyên gia Copywriter bán hàng lão luyện trên Facebook. 
+Nhiệm vụ của bạn là xào (spin) lại đoạn văn bản dưới đây để tạo ra một bài đăng mới mẻ, thu hút, lách thuật toán quét Spam của Facebook.
+
+LUẬT BẮT BUỘC:
+1. TUYỆT ĐỐI GIỮ NGUYÊN 100% các dữ liệu cốt lõi: Tên người, SĐT, Giá tiền, Diện tích, Địa chỉ, và toàn bộ Hashtag, Link (URL).
+2. BẠN CHỈ ĐƯỢC PHÉP làm mới câu từ ở phần Mở bài và các câu miêu tả cảm quan, thêm thắt hoặc đổi Emoji cho sinh động.
+3. KHÔNG dùng các câu mào đầu của AI. Trả về trực tiếp nội dung để đăng lên Facebook.
+
+Văn bản gốc:
+{original_text}"""
+
 def get_config_path():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     user_data_dir = os.path.join(base_dir, "user_data")
@@ -25,6 +37,8 @@ def get_config_path():
 def load_settings():
     default_settings = {
         "api_key": "",
+        "use_ai_spin": False,
+        "ai_spin_prompt": DEFAULT_AI_PROMPT, # Thêm trường lưu Prompt
         "delay_min": 10,
         "delay_max": 30,
         "headless": False,
@@ -352,13 +366,38 @@ class SettingInterface(QWidget):
         api_inner.addWidget(BodyLabel("Mã API Key (Bảo mật):", self))
         
         self.api_input = LineEdit(self)
-        self.api_input.setPlaceholderText("Nhập Gemini API Key để dọn dẹp danh sách tự động...")
+        self.api_input.setPlaceholderText("Nhập Gemini API Key để kích hoạt AI...")
         self.api_input.setEchoMode(LineEdit.EchoMode.Password)
         self.api_input.setClearButtonEnabled(True)
         self.api_input.setText(self.current_settings.get("api_key", "")) 
         
         api_inner.addWidget(self.api_input, stretch=1)
         api_layout.addLayout(api_inner)
+        
+        # --- BẬT TẮT AI ---
+        spin_layout = QHBoxLayout()
+        spin_layout.addWidget(BodyLabel("Bật AI Spin (Trộn) nội dung tự động chống Checkpoint:", self))
+        
+        self.switch_ai_spin = SwitchButton(self)
+        self.switch_ai_spin.setOnText("Bật")
+        self.switch_ai_spin.setOffText("Tắt")
+        self.switch_ai_spin.setChecked(self.current_settings.get("use_ai_spin", False))
+        
+        spin_layout.addWidget(self.switch_ai_spin)
+        spin_layout.addStretch(1)
+        api_layout.addLayout(spin_layout)
+
+        # --- Ô NHẬP LỆNH PROMPT CHO AI ---
+        self.prompt_label = BodyLabel("Câu lệnh cấu hình AI (Giữ nguyên cụm {original_text} ở cuối để truyền bài viết vào):", self)
+        self.prompt_label.setStyleSheet("margin-top: 10px;")
+        api_layout.addWidget(self.prompt_label)
+        
+        self.prompt_input = TextEdit(self)
+        self.prompt_input.setPlaceholderText("Nhập câu lệnh Prompt để điều khiển văn phong AI...")
+        self.prompt_input.setText(self.current_settings.get("ai_spin_prompt", DEFAULT_AI_PROMPT))
+        self.prompt_input.setMinimumHeight(120) 
+        api_layout.addWidget(self.prompt_input)
+
         self.api_box.setLayout(api_layout)
         layout.addWidget(self.api_box)
 
@@ -455,6 +494,8 @@ class SettingInterface(QWidget):
             
         new_settings = {
             "api_key": self.api_input.text().strip(),
+            "use_ai_spin": self.switch_ai_spin.isChecked(),
+            "ai_spin_prompt": self.prompt_input.toPlainText().strip(), # LƯU PROMPT
             "delay_min": min_val,
             "delay_max": max_val,
             "headless": self.switch_headless.isChecked(),

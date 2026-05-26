@@ -9,25 +9,47 @@ from playwright.sync_api import sync_playwright
 import google.generativeai as genai
 
 def get_profile_dir():
-    # Kiểm tra xem đang chạy file .exe hay đang chạy code .py
     if getattr(sys, 'frozen', False):
-        # Nếu là file .exe: lấy đường dẫn thư mục chứa file .exe
         base_dir = os.path.dirname(sys.executable)
     else:
-        # Nếu là code .py: lấy đường dẫn thư mục gốc của dự án
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         
     profile_dir = os.path.join(base_dir, "user_data", "chrome_profile")
     os.makedirs(profile_dir, exist_ok=True)
     return profile_dir
 
+def get_bot_settings():
+    """Hàm đọc cấu hình trực tiếp từ file config.json"""
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        
+    config_path = os.path.join(base_dir, "user_data", "config.json")
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except: pass
+    return {}
+
+# Bổ sung một hàm phụ để triệt tiêu mọi bảng hỏi của Facebook
+def safe_accept_dialog(dialog):
+    try: dialog.accept()
+    except: pass
+
 def get_active_page(browser):
     pages = browser.pages
     if len(pages) > 0: page = pages[0]
     else: page = browser.new_page()
+    
     for i in range(1, len(pages)):
         try: pages[i].close()
         except: pass
+        
+    # --- THÊM DÒNG NÀY ĐỂ BẢO VỆ TOOL KHỎI CRASH KHI CÓ BẢNG HỎI ---
+    page.on("dialog", safe_accept_dialog)
+    
     return page
 
 def handle_browser_launch_error(e, error_signal):
@@ -54,7 +76,12 @@ class LoginThread(QThread):
     def run(self):
         try:
             with sync_playwright() as p:
-                try: browser = p.chromium.launch_persistent_context(user_data_dir=get_profile_dir(), headless=False, args=['--disable-blink-features=AutomationControlled'])
+                try: 
+                    browser = p.chromium.launch_persistent_context(
+                        user_data_dir=get_profile_dir(), 
+                        headless=False, # Luôn hiện cửa sổ để user đăng nhập
+                        args=['--disable-blink-features=AutomationControlled']
+                    )
                 except Exception as e: handle_browser_launch_error(e, self.error_signal); return
                 page = get_active_page(browser)
                 page.goto("https://www.facebook.com/")
@@ -83,32 +110,37 @@ class FetchDataThread(QThread):
 
     def run(self):
         try:
+            settings = get_bot_settings()
+            is_headless = settings.get("headless", False)
+            
             if self.api_key: genai.configure(api_key=self.api_key)
             with sync_playwright() as p:
-                try: browser = p.chromium.launch_persistent_context(user_data_dir=get_profile_dir(), headless=False, args=['--disable-blink-features=AutomationControlled'])
+                try: 
+                    browser = p.chromium.launch_persistent_context(
+                        user_data_dir=get_profile_dir(), 
+                        headless=is_headless, 
+                        args=['--disable-blink-features=AutomationControlled']
+                    )
                 except Exception as e: handle_browser_launch_error(e, self.error_signal); return
                 page = get_active_page(browser)
                 scraped_data = {"groups": [], "pages": []}
 
-                # --- 1. QUÉT NHÓM (CẬP NHẬT THUẬT TOÁN CUỘN ĐỘNG VÔ HẠN) ---
+                # --- 1. QUÉT NHÓM ---
                 self.log_signal.emit("Đang quét danh sách Hội nhóm...")
                 page.goto("https://www.facebook.com/groups/feed/")
                 time.sleep(3)
                 
                 try:
-                    # Di chuột vào vùng menu bên trái chứa danh sách nhóm để chuẩn bị cuộn
                     sidebar = page.locator("div[aria-label='Danh sách nhóm']").first
                     sidebar.hover(timeout=3000)
                     
                     last_group_count = 0
                     no_new_groups_turns = 0
                     
-                    # Vòng lặp cuộn động: Sẽ dừng lại khi cuộn 4 lần liên tiếp mà không thấy nhóm mới xuất hiện
                     while no_new_groups_turns < 4:
                         page.mouse.wheel(0, 2000)
-                        time.sleep(1.5) # Chờ 1.5s để Facebook tải thêm dữ liệu nhóm mới
+                        time.sleep(1.5) 
                         
-                        # Đếm số lượng liên kết hiện tại đang hiển thị trong DOM
                         current_group_count = page.locator("div[aria-label='Danh sách nhóm'][role='navigation'] a").count()
                         if current_group_count == 0:
                             current_group_count = page.locator("a[href*='/groups/']").count()
@@ -116,15 +148,14 @@ class FetchDataThread(QThread):
                         if current_group_count > last_group_count:
                             self.log_signal.emit(f"Đang tải dữ liệu... Đã nhận diện sơ bộ {current_group_count} liên kết nhóm.")
                             last_group_count = current_group_count
-                            no_new_groups_turns = 0 # Reset bộ đếm nếu vẫn thấy có nhóm mới xuất hiện
+                            no_new_groups_turns = 0
                         else:
-                            no_new_groups_turns += 1 # Tăng bộ đếm nếu Facebook không tải thêm nhóm nào nữa
+                            no_new_groups_turns += 1 
                             
                     self.log_signal.emit(" Đã cuộn hết danh sách Hội nhóm. Bắt đầu lọc dữ liệu...")
                 except Exception as e:
                     self.log_signal.emit(f"Lưu ý khi cuộn danh sách nhóm: {str(e)}")
 
-                # Tiến hành nhặt link sau khi đã cuộn hết sạch danh sách
                 group_elements = page.locator("div[aria-label='Danh sách nhóm'][role='navigation'] a").all()
                 if not group_elements: group_elements = page.locator("a[href*='/groups/']").all()
                 for el in group_elements:
@@ -137,7 +168,7 @@ class FetchDataThread(QThread):
                                 if not any(g['url'] == url for g in scraped_data["groups"]): scraped_data["groups"].append({"name": name, "url": url})
                     except: continue
 
-                # --- 2. QUÉT PAGE (CŨNG ÁP DỤNG CUỘN ĐỘNG ĐỂ ĐỒNG BỘ) ---
+                # --- 2. QUÉT PAGE ---
                 self.log_signal.emit("Đang quét danh sách Fanpage...")
                 page.goto("https://www.facebook.com/pages/?category=your_pages")
                 time.sleep(4) 
@@ -228,12 +259,67 @@ class PosterThread(QThread):
         self.content = content
         self.image_paths = image_paths 
 
+    def spin_content_with_ai(self, original_text, api_key, custom_prompt):
+        """Hàm gửi nội dung lên Gemini, tự động thử lần lượt các Model có sẵn cho đến khi thành công"""
+        try:
+            genai.configure(api_key=api_key)
+            
+            # Xử lý nội dung Prompt
+            if "{original_text}" not in custom_prompt:
+                prompt = custom_prompt + "\n\nVăn bản gốc:\n" + original_text
+            else:
+                prompt = custom_prompt.replace("{original_text}", original_text)
+
+            # 1. Quét danh sách tất cả các Model AI có thể dùng được trên máy
+            available_models = []
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+            except:
+                # Nếu không quét được, dùng danh sách dự phòng kinh điển
+                available_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-1.0-pro', 'models/gemini-pro']
+
+            # 2. Vòng lặp "Kẻ sống sót": Thử lần lượt từng Model
+            for model_name in available_models:
+                try:
+                    clean_name = model_name.replace('models/', '') 
+                    self.log_signal.emit(f"   -> Đang thử gọi AI: {clean_name}...")
+                    
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(prompt)
+                    
+                    if response.text:
+                        self.log_signal.emit(f"   -> 🎉 Trộn nội dung thành công bằng {clean_name}!")
+                        return response.text.strip()
+                except Exception as e:
+                    # Nếu model này bị lỗi 404 hoặc bị quá tải, kệ nó, nhảy sang model tiếp theo
+                    continue 
+
+            # 3. Nếu thử tất cả các AI mà vẫn thất bại
+            self.log_signal.emit("⚠️ Đã thử toàn bộ AI nhưng đều thất bại. Đang dùng nội dung gốc...")
+            return original_text
+            
+        except Exception as e:
+            self.log_signal.emit(f"⚠️ Lỗi hệ thống AI ({e}). Đang dùng nội dung gốc...")
+            return original_text
+
     def run(self):
         try:
+            # Lấy toàn bộ thiết lập từ file Config
+            settings = get_bot_settings()
+            api_key = settings.get("api_key", "")
+            use_ai_spin = settings.get("use_ai_spin", False)
+            custom_prompt = settings.get("ai_spin_prompt", "") 
+            delay_min = settings.get("delay_min", 10)
+            delay_max = settings.get("delay_max", 30)
+            is_headless = settings.get("headless", False)
+
             with sync_playwright() as p:
                 try:
                     browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), headless=False, 
+                        user_data_dir=get_profile_dir(), 
+                        headless=is_headless, 
                         args=['--disable-blink-features=AutomationControlled']
                     )
                 except Exception as e:
@@ -259,10 +345,17 @@ class PosterThread(QThread):
 
                 success_count = 0
                 
-                for url in self.urls:
+                for index, url in enumerate(self.urls):
                     switched_profile = False 
+                    current_content = self.content 
                     
                     self.log_signal.emit(f"\n>> Đang xử lý: {url}")
+                    
+                    # 🤖 TRUYỀN PROMPT TÙY BIẾN VÀO CHO AI XỬ LÝ
+                    if use_ai_spin and api_key:
+                        self.log_signal.emit(f"🤖 Đang nhờ Gemini làm mới nội dung cho mục tiêu thứ {index + 1}...")
+                        current_content = self.spin_content_with_ai(self.content, api_key, custom_prompt)
+
                     page.goto(url)
                     page.wait_for_load_state('domcontentloaded')
                     time.sleep(3) 
@@ -279,9 +372,7 @@ class PosterThread(QThread):
                                 break
                         except: pass
 
-                    # ---------------------------------------------------------
                     # BƯỚC 0.5: VƯỢT TƯỜNG LỬA CỦA CÁC NHÓM MUA BÁN/BẤT ĐỘNG SẢN
-                    # ---------------------------------------------------------
                     if "/groups/" in url:
                         self.log_signal.emit("Đang đưa nhóm về chế độ Đăng bài tiêu chuẩn...")
                         try:
@@ -315,14 +406,11 @@ class PosterThread(QThread):
                         self.log_signal.emit(f"-> BỎ QUA: Không tìm thấy nút mở bảng đăng bài.")
                         continue
 
-                    # ---------------------------------------------------------
-                    # BƯỚC 2: GÕ VĂN BẢN (ĐÃ KHẮC PHỤC LỖI NHIỀU Ô NHẬP CHỮ)
-                    # ---------------------------------------------------------
+                    # BƯỚC 2: GÕ VĂN BẢN
                     self.log_signal.emit("Đang tìm ô nhập văn bản...")
                     try:
                         modal_textbox = page.locator("div[role='dialog'] div[role='textbox']")
                         if modal_textbox.count() > 0:
-                            # LUÔN CHỌN Ô CUỐI CÙNG (.last) ĐỂ TRÁNH Ô TIÊU ĐỀ
                             modal_textbox.last.click(timeout=3000)
                         else:
                             page.locator("xpath=//div[@role='textbox']").last.click(timeout=3000)
@@ -330,8 +418,7 @@ class PosterThread(QThread):
                         self.log_signal.emit(f"Cảnh báo click ô nhập: {str(e)}")
 
                     self.log_signal.emit("Đang gõ phím siêu tốc...")
-                    for char in self.content:
-                        # Giảm thời gian chờ xuống chỉ còn 2 đến 10 mili-giây
+                    for char in current_content:
                         page.keyboard.type(char, delay=random.uniform(2, 10)) 
                     time.sleep(1)
 
@@ -382,7 +469,7 @@ class PosterThread(QThread):
                     except Exception as e:
                         self.log_signal.emit("Lưu ý: Không tự bấm được nút Đăng.")
 
-                    # BƯỚC 5: DỌN DẸP POPUP (WHATSAPP...)
+                    # BƯỚC 5: DỌN DẸP POPUP
                     try:
                         close_popups = ["div[role='dialog'] div[aria-label='Lúc khác']", "div[aria-label='Lúc khác']"]
                         for sel in close_popups:
@@ -435,8 +522,9 @@ class PosterThread(QThread):
                         except Exception as e:
                             self.log_signal.emit("Cảnh báo: Không tự chuyển về Profile gốc được.")
 
-                    rest_time = random.randint(5, 10) 
-                    self.log_signal.emit(f"Nghỉ {rest_time}s trước khi sang mục tiêu tiếp theo...")
+                    # LẤY THÔNG SỐ DELAY TỪ CÀI ĐẶT
+                    rest_time = random.randint(delay_min, delay_max) 
+                    self.log_signal.emit(f"Nghỉ ngẫu nhiên {rest_time} giây trước khi sang mục tiêu tiếp theo...")
                     time.sleep(rest_time) 
 
                 browser.close()
@@ -448,15 +536,18 @@ class PosterThread(QThread):
 class LogoutThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
-    log_signal = pyqtSignal(str) # <--- BẠN BỔ SUNG DÒNG NÀY VÀO ĐÂY NHÉ
+    log_signal = pyqtSignal(str)
 
     def run(self):
         try:
+            settings = get_bot_settings()
+            is_headless = settings.get("headless", False)
+            
             with sync_playwright() as p:
                 try:
-                    # Mở lại Profile hiện tại
                     browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), headless=False, 
+                        user_data_dir=get_profile_dir(), 
+                        headless=is_headless, 
                         args=['--disable-blink-features=AutomationControlled']
                     )
                 except Exception as e:
@@ -469,7 +560,6 @@ class LogoutThread(QThread):
                 page.wait_for_load_state('domcontentloaded')
                 time.sleep(3)
                 
-                # 1. TÌM VÀ BẤM VÀO AVATAR Ở GÓC TRÊN BÊN PHẢI
                 self.log_signal.emit("Đang tìm menu Tài khoản...")
                 account_btns = [
                     "div[role='banner'] div[aria-label='Tài khoản']", 
@@ -492,7 +582,6 @@ class LogoutThread(QThread):
                 if not clicked_avatar:
                     self.log_signal.emit("Cảnh báo: Không tìm thấy Avatar để mở menu Đăng xuất.")
                 
-                # 2. BẤM NÚT ĐĂNG XUẤT
                 self.log_signal.emit("Đang tiến hành Đăng xuất...")
                 logout_btns = [
                     "div[role='button']:has-text('Đăng xuất')", 
