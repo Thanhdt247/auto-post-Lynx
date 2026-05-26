@@ -12,7 +12,7 @@ from qfluentwidgets import (FluentIcon, SubtitleLabel, BodyLabel, TitleLabel,
                             ProgressBar, PushButton, PrimaryPushButton)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from version import APP_VERSION as CURRENT_VERSION
-from version import UPDATE_URL as UPDATE_URL
+UPDATE_URL = "https://raw.githubusercontent.com/Thanhdt247/auto-post-Lynx/main/version.json"
 
 def is_dark_mode():
     try:
