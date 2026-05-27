@@ -225,22 +225,38 @@ class LauncherWindow(QWidget):
         self.statusLabel.setText("Tải xong! Đang khởi động lại phần mềm...")
         self.statusLabel.setStyleSheet("color: #10b981; font-weight: bold;")
         
-        if getattr(sys, 'frozen', False):
-            current_exe = os.path.basename(sys.executable)
+        # 1. Nhận diện cả PyInstaller (frozen) và Nuitka (__compiled__)
+        is_compiled = getattr(sys, 'frozen', False) or "__compiled__" in globals()
+        
+        if is_compiled:
+            # 2. Lấy chính xác đường dẫn tuyệt đối của file .exe và thư mục gốc
+            exe_path = os.path.abspath(sys.argv[0] if not sys.executable.endswith('.exe') else sys.executable)
+            exe_dir = os.path.dirname(exe_path)
+            current_exe_name = os.path.basename(exe_path)
+            
+            # Lấy đường dẫn tuyệt đối của thư mục tạm
+            abs_temp_dir = os.path.abspath(temp_dir)
+            
+            # 3. Sử dụng đường dẫn tuyệt đối {exe_dir} thay vì "."
             bat_content = f"""@echo off
 timeout /t 2 /nobreak > NUL
 :loop
-taskkill /f /im "{current_exe}" >nul 2>&1
-xcopy /s /e /y "{temp_dir}\\*" "." >nul 2>&1
+taskkill /f /im "{current_exe_name}" >nul 2>&1
+xcopy /s /e /y "{abs_temp_dir}\\*" "{exe_dir}" >nul 2>&1
 if errorlevel 1 goto loop
 
-rd /s /q "{temp_dir}"
-start "" "{current_exe}" 
+rd /s /q "{abs_temp_dir}"
+cd /d "{exe_dir}"
+start "" "{current_exe_name}" 
 del "%~f0"
 """
-            with open("update.bat", "w", encoding="utf-8") as f:
+            # Lưu file update.bat trực tiếp vào thư mục chứa app
+            bat_path = os.path.join(exe_dir, "update.bat")
+            with open(bat_path, "w", encoding="utf-8") as f:
                 f.write(bat_content)
-            subprocess.Popen(["update.bat"], shell=True)
+                
+            # Khởi chạy script cập nhật với cwd là thư mục của app
+            subprocess.Popen([bat_path], shell=True, cwd=exe_dir)
             sys.exit() 
         else:
             self.statusLabel.setText("Giải nén thành công (Chế độ Developer).")
