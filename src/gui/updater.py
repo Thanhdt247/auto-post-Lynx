@@ -5,14 +5,17 @@ import zipfile
 import shutil
 import requests
 import subprocess
+from PyQt6.QtWidgets import QApplication
+from src.gui.license_window import LicenseWindow
+from src.gui.main_window import AutoPostApp
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QApplication, QGraphicsDropShadowEffect
-from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QGraphicsDropShadowEffect
+from PyQt6.QtGui import QColor, QFont
 from qfluentwidgets import (FluentIcon, SubtitleLabel, BodyLabel, TitleLabel,
                             ProgressBar, PushButton, PrimaryPushButton)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from version import APP_VERSION as CURRENT_VERSION
-UPDATE_URL = "https://raw.githubusercontent.com/Thanhdt247/auto-post-Lynx/main/version.json"
+from src.core.constants import GITHUB_UPDATE_URL as UPDATE_URL
 
 def is_dark_mode():
     try:
@@ -68,7 +71,7 @@ class CheckUpdateThread(QThread):
         result = {
             "has_update": False,
             "version": CURRENT_VERSION,
-            "changelog": "✅ You are running the latest version.\nSystem is ready to launch.",
+            "changelog": "✅ Cài đặt hiện tại đang là phiên bản mới nhất.\nHệ thống đã sẵn sàng khởi chạy.",
             "download_url": ""
         }
         try:
@@ -79,11 +82,11 @@ class CheckUpdateThread(QThread):
                     result.update({"has_update": True, "version": data.get("version"), 
                                    "changelog": data.get("changelog"), "download_url": data.get("download_url")})
         except: 
-            result["changelog"] = "⚠️ Could not connect to update server.\nPlease check your Internet connection!"
+            result["changelog"] = "⚠️ Không thể kết nối tới máy chủ cập nhật.\nVui lòng kiểm tra lại Internet!"
         self.check_finished_signal.emit(result)
 
 # =======================================================
-# MODERN ENGLISH LAUNCHER UI
+# MODERN LAUNCHER UI
 # =======================================================
 class LauncherWindow(QWidget):
     def __init__(self):
@@ -97,24 +100,23 @@ class LauncherWindow(QWidget):
         self.container = QWidget(self)
         self.container.setGeometry(15, 15, 570, 350)
         
-        # Thêm hiệu ứng Shadow đổ bóng 3D cực ngầu
+        # Thêm hiệu ứng Shadow đổ bóng 3D
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setOffset(0, 5)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        shadow.setOffset(0, 4)
         self.container.setGraphicsEffect(shadow)
         
+        # Chỉ can thiệp màu nền khung, để Fluent Widgets tự lo phần màu chữ và nút bấm
         dark = is_dark_mode()
-        bg_color = "#1e1e1e" if dark else "#ffffff"
-        text_color = "white" if dark else "black"
-        border_color = "#333333" if dark else "#e5e5e5"
+        bg_color = "#272727" if dark else "#F9F9F9"
+        border_color = "#323232" if dark else "#E5E5E5"
         
         self.container.setStyleSheet(f"""
             QWidget#launcher_container {{
                 background-color: {bg_color};
-                border-radius: 12px;
+                border-radius: 10px;
                 border: 1px solid {border_color};
-                color: {text_color};
             }}
         """)
         self.container.setObjectName("launcher_container")
@@ -126,7 +128,7 @@ class LauncherWindow(QWidget):
         self.titleLabel = TitleLabel("Starting Lynx Bot...", self.container)
         layout.addWidget(self.titleLabel)
 
-        self.versionLabel = BodyLabel("Connecting to servers...", self.container)
+        self.versionLabel = BodyLabel("Đang kết nối máy chủ...", self.container)
         layout.addWidget(self.versionLabel)
 
         self.changelogLabel = BodyLabel("", self.container)
@@ -186,19 +188,24 @@ class LauncherWindow(QWidget):
         has_update = data.get('has_update', False)
         new_version = data.get('version', CURRENT_VERSION)
         
+        font = self.versionLabel.font()
+        font.setBold(True)
+        font.setPixelSize(14)
+        self.versionLabel.setFont(font)
+
         if has_update:
-            self.titleLabel.setText("🚀 New Update Available!")
-            self.versionLabel.setText(f"Current: v{CURRENT_VERSION}  ➡️  New: v{new_version}")
-            self.versionLabel.setStyleSheet("color: #10b981; font-weight: bold; font-size: 15px;")
+            self.titleLabel.setText("🚀 Đã có bản cập nhật mới!")
+            self.versionLabel.setText(f"Hiện tại: v{CURRENT_VERSION}  ➡️  Mới nhất: v{new_version}")
+            self.versionLabel.setStyleSheet("color: #10b981;") # Xanh ngọc
             self.btn_update.show()
             self.btn_cancel.show()
         else:
             self.titleLabel.setText("Lynx Bot System Launcher")
-            self.versionLabel.setText(f"Current Version: v{CURRENT_VERSION}")
-            self.versionLabel.setStyleSheet("color: #3b82f6; font-weight: bold; font-size: 15px;")
+            self.versionLabel.setText(f"Phiên bản hiện tại: v{CURRENT_VERSION}")
+            self.versionLabel.setStyleSheet("color: #3b82f6;") # Xanh dương
             self.btn_run.show()
             
-        self.changelogLabel.setText(f"Changelog:\n{data.get('changelog', '')}")
+        self.changelogLabel.setText(f"Chi tiết:\n{data.get('changelog', '')}")
 
     def start_download(self):
         self.btn_update.setEnabled(False)
@@ -206,7 +213,7 @@ class LauncherWindow(QWidget):
         self.btn_cancel.setEnabled(False)
         self.progressBar.show()
         self.statusLabel.show()
-        self.statusLabel.setText("Downloading update data... Please do not close!")
+        self.statusLabel.setText("Đang tải dữ liệu bản cập nhật... Vui lòng không đóng cửa sổ!")
         
         self.downloader = DownloadUpdateThread(self.download_url)
         self.downloader.progress_signal.connect(self.progressBar.setValue)
@@ -215,7 +222,7 @@ class LauncherWindow(QWidget):
         self.downloader.start()
         
     def on_download_finished(self, temp_dir):
-        self.statusLabel.setText("Download completed! Restarting application...")
+        self.statusLabel.setText("Tải xong! Đang khởi động lại phần mềm...")
         self.statusLabel.setStyleSheet("color: #10b981; font-weight: bold;")
         
         if getattr(sys, 'frozen', False):
@@ -236,21 +243,34 @@ del "%~f0"
             subprocess.Popen(["update.bat"], shell=True)
             sys.exit() 
         else:
-            self.statusLabel.setText("Extraction successful (Developer Mode).")
+            self.statusLabel.setText("Giải nén thành công (Chế độ Developer).")
             self.btn_run.show()
             self.btn_run.setEnabled(True)
             self.btn_update.hide()
             self.btn_cancel.hide()
             
     def on_download_error(self, err):
-        self.statusLabel.setText(f"Download failed: {err}")
+        self.statusLabel.setText(f"Lỗi tải xuống: {err}")
         self.statusLabel.setStyleSheet("color: #ef4444;")
         self.btn_update.setEnabled(True)
         self.btn_cancel.setEnabled(True)
 
     def launch_main_app(self):
-        # 🌟 CỰC KỲ QUAN TRỌNG: Chỉ khi bấm Launch thì Main Window mới được gọi ra!
-        self.close() 
-        from src.gui.main_window import AutoPostApp
+        # 1. Ẩn Launcher thay vì đóng (để App không tắt ngầm)
+        self.hide() 
+        
+        # 2. Mở Cửa khẩu: Bảng kiểm tra Bản quyền
+        self.license_gate = LicenseWindow()
+        
+        # 3. Kết nối: Khi báo login_success thì mở App chính
+        self.license_gate.login_success.connect(self.open_core_app)
+        
+        self.license_gate.show()
+
+    def open_core_app(self):
+        # 4. Khởi động và hiển thị App chính (Lynx Bot)
         self.main_app = AutoPostApp()
         self.main_app.show()
+        
+        # 5. Phục hồi quy tắc: Đóng app chính là tắt phần mềm
+        QApplication.instance().setQuitOnLastWindowClosed(True)

@@ -47,14 +47,13 @@ def get_active_page(browser):
         try: pages[i].close()
         except: pass
         
-    # --- THÊM DÒNG NÀY ĐỂ BẢO VỆ TOOL KHỎI CRASH KHI CÓ BẢNG HỎI ---
+    # Bảo vệ tool khỏi crash khi có bảng hỏi
     page.on("dialog", safe_accept_dialog)
-    
     return page
 
 def handle_browser_launch_error(e, error_signal):
     if "existing browser session" in str(e).lower():
-        error_signal.emit("LỖI: Trình duyệt đang được mở! Vui lòng tắt cửa sổ Chrome hiện tại.")
+        error_signal.emit("LỖI: Trình duyệt đang được mở! Vui lòng tắt cửa sổ Chrome/Edge hiện tại.")
     else:
         error_signal.emit(f"Lỗi khởi chạy: {str(e)}")
 
@@ -68,6 +67,24 @@ def get_best_ai_model():
         return model_name
     except: return 'gemini-1.0-pro'
 
+# ==============================================================================
+# HÀM SIÊU BẢO MẬT: GỌI TRÌNH DUYỆT EDGE CỦA WINDOWS ĐỂ LÁCH BOT VÀ GIẢM DUNG LƯỢNG APP
+# ==============================================================================
+def launch_stealth_browser(p, is_headless):
+    """Sử dụng Microsoft Edge có sẵn trên máy để chạy Tool, ẩn danh 100%"""
+    return p.chromium.launch_persistent_context(
+        user_data_dir=get_profile_dir(), 
+        headless=is_headless,
+        channel="msedge", # TÍNH NĂNG "ĂN TIỀN": Ép dùng Edge thay vì tải Chromium lậu
+        no_viewport=True,
+        args=[
+            '--disable-blink-features=AutomationControlled', # Ẩn cờ tự động hóa
+            '--disable-infobars',
+            '--no-sandbox'
+        ]
+    )
+
+# ==============================================================================
 
 class LoginThread(QThread):
     finished_signal = pyqtSignal(str)
@@ -77,15 +94,12 @@ class LoginThread(QThread):
         try:
             with sync_playwright() as p:
                 try: 
-                    browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), 
-                        headless=False, # Luôn hiện cửa sổ để user đăng nhập
-                        args=['--disable-blink-features=AutomationControlled']
-                    )
+                    browser = launch_stealth_browser(p, is_headless=False)
                 except Exception as e: handle_browser_launch_error(e, self.error_signal); return
+                
                 page = get_active_page(browser)
                 page.goto("https://www.facebook.com/")
-                self.finished_signal.emit("Cửa sổ Chrome đã mở. Hãy đăng nhập Facebook...")
+                self.finished_signal.emit("Cửa sổ Trình duyệt đã mở. Hãy đăng nhập Facebook...")
                 for _ in range(120): 
                     try:
                         if page.is_closed(): break
@@ -116,12 +130,9 @@ class FetchDataThread(QThread):
             if self.api_key: genai.configure(api_key=self.api_key)
             with sync_playwright() as p:
                 try: 
-                    browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), 
-                        headless=is_headless, 
-                        args=['--disable-blink-features=AutomationControlled']
-                    )
+                    browser = launch_stealth_browser(p, is_headless)
                 except Exception as e: handle_browser_launch_error(e, self.error_signal); return
+                
                 page = get_active_page(browser)
                 scraped_data = {"groups": [], "pages": []}
 
@@ -260,27 +271,21 @@ class PosterThread(QThread):
         self.image_paths = image_paths 
 
     def spin_content_with_ai(self, original_text, api_key, custom_prompt):
-        """Hàm gửi nội dung lên Gemini, tự động thử lần lượt các Model có sẵn cho đến khi thành công"""
         try:
             genai.configure(api_key=api_key)
-            
-            # Xử lý nội dung Prompt
             if "{original_text}" not in custom_prompt:
                 prompt = custom_prompt + "\n\nVăn bản gốc:\n" + original_text
             else:
                 prompt = custom_prompt.replace("{original_text}", original_text)
 
-            # 1. Quét danh sách tất cả các Model AI có thể dùng được trên máy
             available_models = []
             try:
                 for m in genai.list_models():
                     if 'generateContent' in m.supported_generation_methods:
                         available_models.append(m.name)
             except:
-                # Nếu không quét được, dùng danh sách dự phòng kinh điển
                 available_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-1.0-pro', 'models/gemini-pro']
 
-            # 2. Vòng lặp "Kẻ sống sót": Thử lần lượt từng Model
             for model_name in available_models:
                 try:
                     clean_name = model_name.replace('models/', '') 
@@ -293,10 +298,8 @@ class PosterThread(QThread):
                         self.log_signal.emit(f"   -> 🎉 Trộn nội dung thành công bằng {clean_name}!")
                         return response.text.strip()
                 except Exception as e:
-                    # Nếu model này bị lỗi 404 hoặc bị quá tải, kệ nó, nhảy sang model tiếp theo
                     continue 
 
-            # 3. Nếu thử tất cả các AI mà vẫn thất bại
             self.log_signal.emit("⚠️ Đã thử toàn bộ AI nhưng đều thất bại. Đang dùng nội dung gốc...")
             return original_text
             
@@ -306,7 +309,6 @@ class PosterThread(QThread):
 
     def run(self):
         try:
-            # Lấy toàn bộ thiết lập từ file Config
             settings = get_bot_settings()
             api_key = settings.get("api_key", "")
             use_ai_spin = settings.get("use_ai_spin", False)
@@ -317,19 +319,12 @@ class PosterThread(QThread):
 
             with sync_playwright() as p:
                 try:
-                    browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), 
-                        headless=is_headless, 
-                        args=['--disable-blink-features=AutomationControlled']
-                    )
+                    browser = launch_stealth_browser(p, is_headless)
                 except Exception as e:
                     handle_browser_launch_error(e, self.error_signal); return
 
                 page = get_active_page(browser)
                 
-                # ====================================================
-                # HỌC TÊN PROFILE GỐC ĐỂ ĐỔI LẠI SAU KHI ĐĂNG PAGE
-                # ====================================================
                 page.goto("https://www.facebook.com/")
                 page.wait_for_load_state('domcontentloaded')
                 time.sleep(3)
@@ -351,7 +346,6 @@ class PosterThread(QThread):
                     
                     self.log_signal.emit(f"\n>> Đang xử lý: {url}")
                     
-                    # 🤖 TRUYỀN PROMPT TÙY BIẾN VÀO CHO AI XỬ LÝ
                     if use_ai_spin and api_key:
                         self.log_signal.emit(f"🤖 Đang nhờ Gemini làm mới nội dung cho mục tiêu thứ {index + 1}...")
                         current_content = self.spin_content_with_ai(self.content, api_key, custom_prompt)
@@ -545,11 +539,7 @@ class LogoutThread(QThread):
             
             with sync_playwright() as p:
                 try:
-                    browser = p.chromium.launch_persistent_context(
-                        user_data_dir=get_profile_dir(), 
-                        headless=is_headless, 
-                        args=['--disable-blink-features=AutomationControlled']
-                    )
+                    browser = launch_stealth_browser(p, is_headless)
                 except Exception as e:
                     handle_browser_launch_error(e, self.error_signal); return
                 
