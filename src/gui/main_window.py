@@ -58,11 +58,17 @@ def save_settings_to_file(data):
 def load_api_key():
     return load_settings().get('api_key', '')
 
-def apply_gb_style(groupboxes):
-    dark = isDarkTheme()
+# --- FIX MÀU: Đã thêm kiểm tra chế độ Sáng/Tối trực tiếp ---
+def apply_gb_style(groupboxes, is_dark=None):
+    if is_dark is None:
+        is_dark = load_settings().get("theme", "Dark") == "Dark"
+        
+    text_color = 'white' if is_dark else 'black'
+    border_color = '#30363d' if is_dark else '#dcdcdc'
+    
     style = f"""
-        QGroupBox {{ border: 1px solid {'#30363d' if dark else '#dcdcdc'}; border-radius: 8px; margin-top: 15px; padding-top: 15px; font-weight: bold; color: {'white' if dark else 'black'}; }}
-        QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; color: {'white' if dark else 'black'}; }}
+        QGroupBox {{ border: 1px solid {border_color}; border-radius: 8px; margin-top: 15px; padding-top: 15px; font-weight: bold; color: {text_color}; }}
+        QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; color: {text_color}; }}
     """
     for gb in groupboxes: gb.setStyleSheet(style)
 
@@ -193,7 +199,7 @@ class FeaturesInterface(QWidget):
             self.btn_run.setText("Khởi động AutoPost")
             self.content_input.setPlaceholderText("Nhập nội dung bài viết. Tool sẽ giữ nguyên 100% văn bản của bạn và gõ phím như người thật...")
 
-    def update_styles(self): apply_gb_style(self.groupboxes)
+    def update_styles(self, is_dark=None): apply_gb_style(self.groupboxes, is_dark)
     def log_to_terminal(self, msg): self.parent_window.terminal_interface.log_message(msg)
 
     def filter_groups(self, text):
@@ -397,7 +403,10 @@ class SettingInterface(QWidget):
         self.combo_theme = ComboBox(self)
         self.combo_theme.addItems(["Tối (Dark)", "Sáng (Light)"])
         self.combo_theme.setCurrentIndex(0 if self.current_settings.get("theme", "Dark") == "Dark" else 1)
-        self.combo_theme.currentIndexChanged.connect(lambda i: setTheme(Theme.DARK) if i==0 else setTheme(Theme.LIGHT))
+        
+        # --- FIX MÀU: Ép thay đổi màu ngay khi gạt công tắc ---
+        self.combo_theme.currentIndexChanged.connect(self.change_theme_and_style)
+        
         sys_layout.addWidget(self.combo_theme)
         
         sys_layout.addStretch(1)
@@ -411,6 +420,18 @@ class SettingInterface(QWidget):
         self.btn_save = PrimaryPushButton(FluentIcon.SAVE, "Lưu toàn bộ cài đặt", self)
         self.btn_save.clicked.connect(self.save_all_settings)
         layout.addWidget(self.btn_save, alignment=Qt.AlignmentFlag.AlignRight)
+
+    # --- HÀM MỚI: Xử lý thay đổi giao diện động ---
+    def change_theme_and_style(self, index):
+        is_dark = (index == 0)
+        setTheme(Theme.DARK if is_dark else Theme.LIGHT)
+        
+        # Cập nhật màu chữ cho Setting Tab
+        self.update_styles(is_dark)
+        
+        # Gọi sang Features Tab để cập nhật nốt mấy cái GroupBox bên đó
+        if hasattr(self, 'parent_window') and self.parent_window:
+            self.parent_window.features_interface.update_styles(is_dark)
 
     def refresh_auth_ui(self):
         auth = load_auth_info()
@@ -475,7 +496,7 @@ class SettingInterface(QWidget):
         else:
             InfoBar.error("Thất bại", msg, parent=self)
 
-    def update_styles(self): apply_gb_style(self.groupboxes)
+    def update_styles(self, is_dark=None): apply_gb_style(self.groupboxes, is_dark)
 
     def save_all_settings(self):
         new_settings = {
