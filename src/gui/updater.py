@@ -222,38 +222,53 @@ class LauncherWindow(QWidget):
         self.downloader.start()
         
     def on_download_finished(self, temp_dir):
-        self.statusLabel.setText("Tải xong! Đang khởi động lại phần mềm...")
+        self.statusLabel.setText("Tải xong! Đang xử lý dữ liệu...")
         self.statusLabel.setStyleSheet("color: #10b981; font-weight: bold;")
         
-        # Kiểm tra thực tế tên file đang chạy (Chống lỗi Nuitka)
-        is_compiled_exe = sys.executable.lower().endswith('.exe') and 'python' not in sys.executable.lower()
-        
-        if is_compiled_exe or getattr(sys, 'frozen', False) or "__compiled__" in globals():
-            current_exe = os.path.basename(sys.executable)
+        # Dùng "__compiled__" để nhận diện chuẩn xác môi trường Nuitka
+        if getattr(sys, 'frozen', False) or "__compiled__" in globals():
+            # 🔥 SỬA LỖI NUITKA: Khắc phục việc Nuitka đánh lừa biến sys.executable
+            # Bắt buộc dùng sys.argv[0] để lấy chính xác tên file Lynx-bot.exe
+            real_exe_path = os.path.abspath(sys.argv[0])
+            exe_dir = os.path.dirname(real_exe_path)
+            current_exe = os.path.basename(real_exe_path)
+            temp_dir_abs = os.path.abspath(temp_dir)
+            
+            bat_path = os.path.join(exe_dir, "update.bat")
+
             bat_content = f"""@echo off
+cd /d "{exe_dir}"
 timeout /t 2 /nobreak > NUL
 :loop
 taskkill /f /im "{current_exe}" >nul 2>&1
-xcopy /s /e /y "{temp_dir}\\*" "." >nul 2>&1
+timeout /t 1 /nobreak > NUL
+xcopy /s /e /y /c /i /h "{temp_dir_abs}\\*" "." >nul 2>&1
 if errorlevel 1 goto loop
 
-rd /s /q "{temp_dir}"
+rd /s /q "{temp_dir_abs}"
 start "" "{current_exe}" 
 del "%~f0"
 """
-            with open("update.bat", "w", encoding="utf-8") as f:
+            with open(bat_path, "w", encoding="utf-8") as f:
                 f.write(bat_content)
             
-            # 🔥 FIX: CHẠY FILE .BAT ẨN HOÀN TOÀN (KHÔNG HIỆN BẢNG ĐEN) 🔥
-            if os.name == 'nt':  # Nếu là Windows
+            # Ép chạy ngầm update.bat
+            if os.name == 'nt':
                 CREATE_NO_WINDOW = 0x08000000
-                subprocess.Popen(["cmd.exe", "/c", "update.bat"], creationflags=CREATE_NO_WINDOW)
+                subprocess.Popen(["cmd.exe", "/c", "update.bat"], creationflags=CREATE_NO_WINDOW, cwd=exe_dir)
             else:
-                subprocess.Popen(["update.bat"], shell=True)
+                subprocess.Popen(["cmd.exe", "/c", "update.bat"], shell=True, cwd=exe_dir)
                 
-            sys.exit() 
+            os._exit(0) 
         else:
-            self.statusLabel.setText("Giải nén thành công (Chế độ Developer).")
+            self.statusLabel.setText("Đang copy file (Chế độ Dev)...")
+            try:
+                import shutil
+                shutil.copytree(temp_dir, ".", dirs_exist_ok=True)
+                shutil.rmtree(temp_dir)
+                self.statusLabel.setText("Cập nhật xong! Vui lòng khởi động lại app.")
+            except Exception as e:
+                self.statusLabel.setText(f"Lỗi: {e}")
             self.btn_run.show()
             self.btn_run.setEnabled(True)
             self.btn_update.hide()
