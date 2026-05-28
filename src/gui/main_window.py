@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidgetItem, 
                              QTextEdit, QGroupBox, QFileDialog) 
 from qfluentwidgets import (FluentWindow, FluentIcon, NavigationItemPosition,
-                            TextEdit, PrimaryPushButton, PushButton, InfoBar, 
+                            TextEdit, PlainTextEdit, PrimaryPushButton, PushButton, InfoBar, 
                             SubtitleLabel, ListWidget, LineEdit, SpinBox, 
                             SwitchButton, ComboBox, setTheme, Theme, BodyLabel, 
                             isDarkTheme, IconWidget)
@@ -158,7 +158,7 @@ class FeaturesInterface(QWidget):
         img_layout.addWidget(self.btn_select_image); img_layout.addWidget(self.lbl_images, stretch=1)
         layout.addLayout(img_layout)
 
-        self.content_input = TextEdit(self)
+        self.content_input = PlainTextEdit(self)
         self.content_input.setPlaceholderText("Nhập nội dung bài viết...")
         layout.addWidget(self.content_input, stretch=1)
 
