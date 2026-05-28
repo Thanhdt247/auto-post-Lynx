@@ -225,7 +225,10 @@ class LauncherWindow(QWidget):
         self.statusLabel.setText("Tải xong! Đang khởi động lại phần mềm...")
         self.statusLabel.setStyleSheet("color: #10b981; font-weight: bold;")
         
-        if getattr(sys, 'frozen', False):
+        # Kiểm tra thực tế tên file đang chạy (Chống lỗi Nuitka)
+        is_compiled_exe = sys.executable.lower().endswith('.exe') and 'python' not in sys.executable.lower()
+        
+        if is_compiled_exe or getattr(sys, 'frozen', False) or "__compiled__" in globals():
             current_exe = os.path.basename(sys.executable)
             bat_content = f"""@echo off
 timeout /t 2 /nobreak > NUL
@@ -240,7 +243,14 @@ del "%~f0"
 """
             with open("update.bat", "w", encoding="utf-8") as f:
                 f.write(bat_content)
-            subprocess.Popen(["update.bat"], shell=True)
+            
+            # 🔥 FIX: CHẠY FILE .BAT ẨN HOÀN TOÀN (KHÔNG HIỆN BẢNG ĐEN) 🔥
+            if os.name == 'nt':  # Nếu là Windows
+                CREATE_NO_WINDOW = 0x08000000
+                subprocess.Popen(["cmd.exe", "/c", "update.bat"], creationflags=CREATE_NO_WINDOW)
+            else:
+                subprocess.Popen(["update.bat"], shell=True)
+                
             sys.exit() 
         else:
             self.statusLabel.setText("Giải nén thành công (Chế độ Developer).")

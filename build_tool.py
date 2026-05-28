@@ -8,8 +8,13 @@ print("="*50)
 print("🚀 LYNX BOT - HỆ THỐNG ĐÓNG GÓI BẢO MẬT (NUITKA C++) 🚀")
 print("="*50)
 
-# 1. Nhập thông tin bản mới
-new_version = input("👉 Nhập phiên bản mới (vd: 1.0.1): ").strip()
+# 1. Nhập thông tin bản mới (Thêm khóa bảo vệ chống nhập rỗng)
+while True:
+    new_version = input("👉 Nhập phiên bản mới (vd: 1.0.1): ").strip()
+    if new_version: 
+        break
+    print("⚠️ Không được để trống phiên bản!")
+    
 changelog = input("👉 Nhập nội dung cập nhật (Dùng \\n để xuống dòng): ").strip()
 
 print(f"\n[1/4] Đang cập nhật hệ thống lên phiên bản v{new_version}...")
@@ -25,21 +30,20 @@ with open("version.json", "w", encoding="utf-8") as f:
     json.dump(github_json, f, indent=4, ensure_ascii=False)
 
 print("\n[2/4] Đang gọi NUITKA để biên dịch mã nguồn sang C++ (Sẽ mất vài phút)...")
-print("      (Nuitka sẽ bảo vệ 100% source code của sếp khỏi việc bị dịch ngược!)")
+print("      (Nuitka sẽ bảo vệ 100% source code khỏi việc bị dịch ngược!)")
 
 # Tự động tìm thư viện Playwright để đóng gói kèm
 playwright_include = ""
 try:
     import playwright
     pw_path = os.path.dirname(playwright.__file__)
-    # FIX LỖI DẤU CÁCH: Bọc toàn bộ tham số vào trong ngoặc kép ""
     playwright_include = f'--include-data-dir="{pw_path}=playwright"'
     print("      - Đã tìm thấy thư viện Playwright, đưa vào luồng đóng gói...")
 except ImportError:
     pass
 
-# Lệnh Nuitka siêu bảo mật có gắn Icon
-nuitka_cmd = f'python -m nuitka --standalone --windows-disable-console --windows-icon-from-ico=logo.ico --enable-plugin=pyqt6 {playwright_include} --output-dir=dist main.py'
+# 🔥 TỐI ƯU: Thêm --remove-output để Nuitka tự xóa rác C++ sau khi biên dịch xong
+nuitka_cmd = f'python -m nuitka --standalone --windows-disable-console --windows-icon-from-ico=logo.ico --enable-plugin=pyqt6 {playwright_include} --remove-output --output-dir=dist main.py'
 
 # Chạy lệnh biên dịch và kiểm tra lỗi
 result = subprocess.run(nuitka_cmd, shell=True)
@@ -64,6 +68,11 @@ if os.path.exists(dist_dir):
         os.rename(exe_path, new_exe_path)
     os.rename(dist_dir, target_dir)
 
+# 🔥 TỐI ƯU: Quét dọn thủ công thư mục rác .build nếu cờ --remove-output bỏ sót
+build_dir = os.path.join("dist", "main.build")
+if os.path.exists(build_dir):
+    shutil.rmtree(build_dir)
+
 zip_name = "update_package"
 if os.path.exists(f"{zip_name}.zip"):
     os.remove(f"{zip_name}.zip")
@@ -74,7 +83,7 @@ print("\n[4/4] 🎉 HOÀN TẤT QUY TRÌNH!")
 print(f"✅ Đã tạo xong file: update_package.zip (Mã hóa C++ 100%)")
 print(f"✅ Đã tạo xong file: version.json")
 print("="*50)
-print("BƯỚC TIẾP THEO BẠN CẦN LÀM:")
+print("BƯỚC TIẾP THEO CẦN LÀM:")
 print(f"1. Up toàn bộ code (gồm version.json) lên nhánh main của GitHub.")
 print(f"2. Tạo Release mới tên v{new_version} trên GitHub.")
 print(f"3. Kéo thả file update_package.zip vào Release đó và Publish!")

@@ -5,7 +5,8 @@ from PyQt6.QtCore import pyqtSignal, Qt, QThread
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGraphicsDropShadowEffect
 from PyQt6.QtGui import QColor
 from qfluentwidgets import (LineEdit, PrimaryPushButton, TransparentPushButton, InfoBar, 
-                            InfoBarPosition, TitleLabel, BodyLabel, setTheme, Theme, FluentIcon)
+                            InfoBarPosition, TitleLabel, BodyLabel, setTheme, Theme, FluentIcon,
+                            TransparentToolButton) # Bổ sung TransparentToolButton
 from src.core.license_manager import login_user, register_user
 
 def get_auth_path():
@@ -44,6 +45,12 @@ class LicenseWindow(QWidget):
         
         self.container = QWidget(self)
         self.container.setGeometry(15, 15, 470, 450)
+        
+        # 🔥 FIX: THÊM NÚT TẮT (X) TRÊN CÙNG BÊN PHẢI 🔥
+        self.btn_close = TransparentToolButton(FluentIcon.CLOSE, self.container)
+        self.btn_close.setFixedSize(32, 32)
+        self.btn_close.move(self.container.width() - 36, 10) 
+        self.btn_close.clicked.connect(sys.exit) # Bấm vào là thoát sạch ứng dụng
         
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
@@ -119,7 +126,6 @@ class LicenseWindow(QWidget):
         u, p = self.username_input.text().strip(), self.password_input.text().strip()
         
         if not u or not p:
-            # FIX: Dùng parent=self để nó nổi lên toàn bộ cửa sổ, không bị kẹt trong container
             InfoBar.warning("Cảnh báo", "Vui lòng nhập đủ thông tin!", parent=self, position=InfoBarPosition.TOP)
             return
             
@@ -150,9 +156,7 @@ class LicenseWindow(QWidget):
                 self.login_success.emit()
                 self.close()
             else:
-                # FIX: Dùng parent=self
                 InfoBar.success("Thành công", msg, parent=self, position=InfoBarPosition.TOP)
                 self.toggle_mode() 
         else:
-            # FIX: Dùng parent=self
             InfoBar.error("Thất bại", msg, parent=self, position=InfoBarPosition.TOP)
